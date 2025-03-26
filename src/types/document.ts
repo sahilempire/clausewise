@@ -2,7 +2,7 @@ export interface Document {
   id: string;
   title: string;
   date: string;
-  status: 'pending' | 'processing' | 'completed' | 'error';
+  status: 'pending' | 'processing' | 'completed' | 'error' | 'analyzing';
   riskScore?: number;
   clauses?: number;
   summary?: string;
@@ -27,6 +27,6 @@ export interface DocumentCreateInput {
 export interface DocumentUpdateInput {
   title?: string;
   description?: string;
-  status?: 'pending' | 'processing' | 'completed' | 'error';
+  status?: 'pending' | 'processing' | 'completed' | 'error' | 'analyzing';
   analysis_result?: any;
 } 

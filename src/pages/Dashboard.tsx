@@ -27,7 +27,14 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
-import pdfParse from 'pdf-parse';
+import * as pdfjsLib from 'pdfjs-dist';
+import { Document } from '@/types/document';
+import { DateRange } from 'react-day-picker';
+import { supabase, STORAGE_BUCKET } from "@/lib/supabase";
+import PDFWorker from '@/lib/pdf-worker';
+
+// Initialize PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // Define top most used agreement types
 const popularAgreements = [
@@ -41,56 +48,6 @@ const popularAgreements = [
   { label: "Equity Agreement", value: "equity" },
 ];
 
-// Define document types
-type AnalyzingDocument = {
-  id: string;
-  title: string;
-  date: string;
-  status: "analyzing";
-  progress: number;
-};
-
-type CompletedDocument = {
-  id: string;
-  title: string;
-  date: string;
-  status: "completed";
-  riskScore: number;
-  clauses: number;
-  summary?: string;
-  jurisdiction?: string;
-  keyFindings: {
-    title: string;
-    description: string;
-    riskLevel: 'low' | 'medium' | 'high';
-    extractedText?: string;
-    mitigationOptions?: string[];
-    redraftedClauses?: string[]; // Added redrafted clauses
-  }[];
-};
-
-type ErrorDocument = {
-  id: string;
-  title: string;
-  date: string;
-  status: "error";
-};
-
-type Document = AnalyzingDocument | CompletedDocument | ErrorDocument;
-
-type FilterOptions = {
-  status: {
-    analyzing: boolean;
-    completed: boolean;
-    error: boolean,
-  };
-  risk: {
-    low: boolean;
-    medium: boolean;
-    high: boolean;
-  };
-};
-
 const Dashboard = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [contracts, setContracts] = useState<GeneratedContract[]>([]);
@@ -101,9 +58,10 @@ const Dashboard = () => {
   const [documentToDelete, setDocumentToDelete] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [mode, setMode] = useState<"create" | "analyze">("create");
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+  const [filterOptions, setFilterOptions] = useState({
     status: {
-      analyzing: true,
+      pending: true,
+      processing: true,
       completed: true,
       error: true,
     },
@@ -155,46 +113,31 @@ const Dashboard = () => {
       }
     };
   }, [toast]);
-  
-  const toggleRecording = () => {
-    if (!recognitionRef.current) {
-      toast({
-        title: "Voice recognition not supported",
-        description: "Your browser doesn't support voice recognition.",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    if (isRecording) {
-      recognitionRef.current.stop();
-      setIsRecording(false);
-      toast({
-        title: "Voice recording stopped",
-        description: "You can now edit the transcribed text or analyze it.",
-      });
-    } else {
-      setDocumentText("");
-      recognitionRef.current.start();
-      setIsRecording(true);
-      toast({
-        title: "Voice recording started",
-        description: "Speak clearly into your microphone. The text will appear as you speak.",
-      });
-    }
-  };
 
-  // Load documents and contracts from localStorage on initial render
+  // Load documents from Supabase
   useEffect(() => {
-    const storedDocs = localStorage.getItem('documents');
-    if (storedDocs) {
+    const loadDocuments = async () => {
       try {
-        setDocuments(JSON.parse(storedDocs));
+        const { data, error } = await documentService.getDocuments();
+        if (error) throw error;
+        if (data) {
+          setDocuments(data);
+        }
       } catch (error) {
-        console.error("Error parsing documents from localStorage:", error);
+        console.error('Error loading documents:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load documents",
+          variant: "destructive",
+        });
       }
-    }
-    
+    };
+
+    loadDocuments();
+  }, []);
+
+  // Load contracts from localStorage on initial render
+  useEffect(() => {
     const storedContracts = localStorage.getItem('contracts');
     if (storedContracts) {
       try {
@@ -205,11 +148,6 @@ const Dashboard = () => {
     }
   }, []);
 
-  // Save documents to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('documents', JSON.stringify(documents));
-  }, [documents]);
-  
   // Save contracts to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('contracts', JSON.stringify(contracts));
@@ -217,67 +155,78 @@ const Dashboard = () => {
 
   // Apply filters to documents
   useEffect(() => {
-    let filtered = [...documents];
+    const filteredDocuments = documents.filter((doc) => {
+      const statusMatch = filterOptions.status[doc.status as keyof typeof filterOptions.status];
+      const riskMatch = doc.riskScore === undefined || 
+        (doc.riskScore <= 0.3 && filterOptions.risk.low) ||
+        (doc.riskScore > 0.3 && doc.riskScore <= 0.7 && filterOptions.risk.medium) ||
+        (doc.riskScore > 0.7 && filterOptions.risk.high);
+      
+      return statusMatch && riskMatch;
+    });
     
-    // Filter by status
-    filtered = filtered.filter(doc => 
-      (doc.status === "analyzing" && filterOptions.status.analyzing) ||
-      (doc.status === "completed" && filterOptions.status.completed) ||
-      (doc.status === "error" && filterOptions.status.error)
-    );
-    
-    // Filter by risk (for completed documents only)
-    if (!filterOptions.risk.low || !filterOptions.risk.medium || !filterOptions.risk.high) {
-      filtered = filtered.filter(doc => {
-        if (doc.status !== "completed") return true;
-        
-        const riskScore = doc.riskScore;
-        
-        return (riskScore < 30 && filterOptions.risk.low) ||
-               (riskScore >= 30 && riskScore < 70 && filterOptions.risk.medium) ||
-               (riskScore >= 70 && filterOptions.risk.high);
-      });
-    }
-    
-    setFilteredDocuments(filtered);
+    setFilteredDocuments(filteredDocuments);
   }, [documents, filterOptions]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-    
+    const file = event.target.files?.[0];
+    if (!file) return;
+
     try {
-      const file = files[0];
-      const fileType = file.type.toLowerCase();
-      
-      setIsAnalyzing(true);
-      setAnalysisProgress(0);
-      
-      let extractedText = "";
-      
-      if (fileType.includes('text')) {
-        extractedText = await file.text();
-      } else if (fileType === 'application/pdf') {
+      if (file.type === 'application/pdf') {
+        // Read the file as ArrayBuffer
         const arrayBuffer = await file.arrayBuffer();
-        const pdfData = await pdfParse(arrayBuffer);
-        extractedText = pdfData.text;
+        
+        // Load PDF from ArrayBuffer
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        let fullText = '';
+        
+        // Show progress toast
+        toast({
+          title: "Processing PDF",
+          description: `Extracting text from ${pdf.numPages} pages...`,
+        });
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((item: any) => item.str).join(' ');
+          fullText += pageText + '\n';
+          
+          // Update progress toast
+          toast({
+            title: "Processing PDF",
+            description: `Extracted text from page ${i} of ${pdf.numPages}`,
+          });
+        }
+        
+        setDocumentText(fullText);
+        
+        // Success toast
+        toast({
+          title: "PDF processed successfully",
+          description: `Extracted text from ${pdf.numPages} pages`,
+        });
+      } else if (file.type === 'text/plain') {
+        const text = await file.text();
+        setDocumentText(text);
+        toast({
+          title: "Text file loaded",
+          description: "The text file has been loaded successfully",
+        });
       } else {
-        throw new Error("Unsupported file type. Please upload a text or PDF file.");
+        toast({
+          title: "Unsupported file type",
+          description: "Please upload a PDF or text file.",
+          variant: "destructive",
+        });
       }
-      
-      if (!extractedText || extractedText.trim().length < 50) {
-        throw new Error("Not enough text content to analyze");
-      }
-      
-      analyzeTextDocument(extractedText, file.name.split('.')[0]);
-      
     } catch (error) {
-      console.error("Upload error:", error);
-      setIsAnalyzing(false);
-      
+      console.error('Error processing file:', error);
       toast({
-        title: "Upload error",
-        description: error instanceof Error ? error.message : "There was an error uploading your document. Please try again.",
+        title: "Error processing file",
+        description: error instanceof Error ? error.message : "There was an error processing your file. Please try again.",
         variant: "destructive",
       });
     }
@@ -298,36 +247,35 @@ const Dashboard = () => {
     
     // Add new document
     const newDocId = `doc-${Date.now()}`;
-    const newDoc: AnalyzingDocument = {
+    const newDoc: Document = {
       id: newDocId,
       title: title || "Pasted Document",
       date: new Date().toISOString(),
-      status: "analyzing",
-      progress: 0,
+      status: "processing",
     };
     
     setDocuments(prev => [newDoc, ...prev]);
     
     try {
-    // Simulate analysis progress
-    let progress = 0;
-    const analysisInterval = setInterval(() => {
-      progress += 2;
-      setAnalysisProgress(progress);
+      // Simulate analysis progress
+      let progress = 0;
+      const analysisInterval = setInterval(() => {
+        progress += 2;
+        setAnalysisProgress(progress);
+        
+        setDocuments(prev => 
+          prev.map(doc => 
+            doc.id === newDocId && doc.status === "processing"
+              ? { ...doc, status: "processing" }
+              : doc
+          )
+        );
+        
+        if (progress >= 100) {
+          clearInterval(analysisInterval);
+        }
+      }, 200);
       
-      setDocuments(prev => 
-        prev.map(doc => 
-          doc.id === newDocId && doc.status === "analyzing"
-            ? { ...doc, progress }
-            : doc
-        )
-      );
-      
-      if (progress >= 100) {
-        clearInterval(analysisInterval);
-      }
-    }, 200);
-    
       // Call AI service for analysis
       const result = await aiService.analyzeText(text);
       
@@ -339,7 +287,7 @@ const Dashboard = () => {
                 id: doc.id,
                 title: result.documentTitle || title,
                 date: doc.date,
-                status: "completed" as const,
+                status: "completed",
                 riskScore: result.riskScore,
                 clauses: result.clauses,
                 summary: result.summary,
@@ -364,7 +312,7 @@ const Dashboard = () => {
                 id: doc.id,
                 title: doc.title,
                 date: doc.date,
-                status: "error" as const,
+                status: "error",
               }
             : doc
         )
@@ -420,8 +368,8 @@ const Dashboard = () => {
       ...prev,
       [type]: {
         ...prev[type],
-        [key]: checked
-      }
+        [key]: checked,
+      },
     }));
   };
   
@@ -431,7 +379,7 @@ const Dashboard = () => {
   };
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [sortBy, setSortBy] = useState<'date' | 'risk' | 'title'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -440,13 +388,32 @@ const Dashboard = () => {
     const fetchDocuments = async () => {
       try {
         const filters = {
-          searchTerm,
-          dateRange,
+          searchTerm: searchTerm || undefined,
+          dateRange: dateRange ? {
+            start: dateRange.from || new Date(),
+            end: dateRange.to || new Date(),
+          } : undefined,
           sortBy,
           sortOrder,
         };
-        const results = await documentService.searchDocuments(filters);
-        setFilteredDocuments(results);
+
+        const { data, error } = await documentService.searchDocuments(filters);
+        
+        if (error) {
+          console.error('Error fetching documents:', error);
+          toast({
+            title: "Error fetching documents",
+            description: error.message || "Please try again later",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        if (data) {
+          setFilteredDocuments(data);
+        } else {
+          setFilteredDocuments([]);
+        }
       } catch (error) {
         console.error('Error fetching documents:', error);
         toast({
@@ -481,6 +448,34 @@ const Dashboard = () => {
       recognitionRef.current.stop();
     }
     setIsRecording(false);
+  };
+
+  const toggleRecording = () => {
+    if (!recognitionRef.current) {
+      toast({
+        title: "Voice recognition not supported",
+        description: "Your browser doesn't support voice recognition.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (isRecording) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+      toast({
+        title: "Voice recording stopped",
+        description: "You can now edit the transcribed text or analyze it.",
+      });
+    } else {
+      setDocumentText("");
+      recognitionRef.current.start();
+      setIsRecording(true);
+      toast({
+        title: "Voice recording started",
+        description: "Speak clearly into your microphone. The text will appear as you speak.",
+      });
+    }
   };
 
   return (

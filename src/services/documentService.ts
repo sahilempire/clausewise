@@ -3,7 +3,7 @@ import { Document, DocumentCreateInput, DocumentUpdateInput } from '@/types/docu
 
 export interface SearchFilters {
   searchTerm?: string;
-  status?: 'pending' | 'processing' | 'completed' | 'error';
+  status?: 'pending' | 'processing' | 'completed' | 'error' | 'analyzing';
   riskLevel?: 'low' | 'medium' | 'high';
   dateRange?: {
     start: Date;
@@ -99,58 +99,58 @@ export const documentService = {
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
-
-      return { path: publicUrl, error: null };
+      return { path: filePath, error: null };
     } catch (error) {
       return { path: null, error: error as Error };
     }
   },
 
-  async searchDocuments(filters: SearchFilters): Promise<Document[]> {
-    let query = supabase
-      .from('documents')
-      .select('*');
+  async searchDocuments(filters: SearchFilters): Promise<{ data: Document[] | null; error: Error | null }> {
+    try {
+      let query = supabase
+        .from('documents')
+        .select('*');
 
-    // Apply search term filter
-    if (filters.searchTerm) {
-      query = query.or(`title.ilike.%${filters.searchTerm}%,description.ilike.%${filters.searchTerm}%`);
+      // Apply filters
+      if (filters.searchTerm) {
+        query = query.ilike('title', `%${filters.searchTerm}%`);
+      }
+
+      if (filters.status) {
+        query = query.eq('status', filters.status);
+      }
+
+      if (filters.dateRange) {
+        query = query
+          .gte('created_at', filters.dateRange.start.toISOString())
+          .lte('created_at', filters.dateRange.end.toISOString());
+      }
+
+      // Apply sorting
+      if (filters.sortBy) {
+        const sortColumn = filters.sortBy === 'date' ? 'created_at' : filters.sortBy;
+        query = query.order(sortColumn, { ascending: filters.sortOrder === 'asc' });
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Supabase query error:', error);
+        throw error;
+      }
+
+      // Transform the data to match our Document type
+      const transformedData = data?.map(doc => ({
+        ...doc,
+        date: doc.created_at || doc.date,
+        status: doc.status || 'pending',
+      }));
+
+      return { data: transformedData || [], error: null };
+    } catch (error) {
+      console.error('Error in searchDocuments:', error);
+      return { data: null, error: error as Error };
     }
-
-    // Apply status filter
-    if (filters.status) {
-      query = query.eq('status', filters.status);
-    }
-
-    // Apply risk level filter
-    if (filters.riskLevel) {
-      query = query.eq('risk_level', filters.riskLevel);
-    }
-
-    // Apply date range filter
-    if (filters.dateRange) {
-      query = query
-        .gte('created_at', filters.dateRange.start.toISOString())
-        .lte('created_at', filters.dateRange.end.toISOString());
-    }
-
-    // Apply sorting
-    if (filters.sortBy) {
-      const order = filters.sortOrder || 'desc';
-      query = query.order(filters.sortBy, { ascending: order === 'asc' });
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Error searching documents:', error);
-      throw new Error('Failed to search documents');
-    }
-
-    return data || [];
   },
 
   async getDocumentAnalytics(): Promise<{
@@ -159,32 +159,38 @@ export const documentService = {
     documentsByRisk: Record<string, number>;
     recentActivity: Document[];
   }> {
-    const { data: documents, error } = await supabase
-      .from('documents')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(10);
+    try {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
 
-    if (error) {
-      console.error('Error fetching document analytics:', error);
-      throw new Error('Failed to fetch document analytics');
-    }
+      if (error) throw error;
 
-    const analytics = {
-      totalDocuments: documents.length,
-      documentsByStatus: documents.reduce((acc, doc) => {
+      const documents = data || [];
+      const totalDocuments = documents.length;
+      const documentsByStatus = documents.reduce((acc, doc) => {
         acc[doc.status] = (acc[doc.status] || 0) + 1;
         return acc;
-      }, {} as Record<string, number>),
-      documentsByRisk: documents.reduce((acc, doc) => {
-        if (doc.risk_level) {
-          acc[doc.risk_level] = (acc[doc.risk_level] || 0) + 1;
+      }, {} as Record<string, number>);
+
+      const documentsByRisk = documents.reduce((acc, doc) => {
+        if (doc.riskScore) {
+          const riskLevel = doc.riskScore < 30 ? 'low' : doc.riskScore < 70 ? 'medium' : 'high';
+          acc[riskLevel] = (acc[riskLevel] || 0) + 1;
         }
         return acc;
-      }, {} as Record<string, number>),
-      recentActivity: documents
-    };
+      }, {} as Record<string, number>);
 
-    return analytics;
-  }
+      return {
+        totalDocuments,
+        documentsByStatus,
+        documentsByRisk,
+        recentActivity: documents,
+      };
+    } catch (error) {
+      throw error;
+    }
+  },
 }; 

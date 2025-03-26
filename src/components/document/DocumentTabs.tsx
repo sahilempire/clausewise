@@ -10,26 +10,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-type Document = {
-  id: string;
-  title: string;
-  date: string;
-  status: "analyzing" | "completed" | "error";
-  progress?: number;
-  riskScore?: number;
-  clauses?: number;
-  summary?: string;
-  jurisdiction?: string;
-  keyFindings?: {
-    title: string;
-    description: string;
-    riskLevel: 'low' | 'medium' | 'high';
-    extractedText?: string;
-    mitigationOptions?: string[];
-    redraftedClauses?: string[];
-  }[];
-};
+import { Document } from "@/types/document";
 
 type DocumentTabsProps = {
   documents: Document[];
@@ -37,9 +18,10 @@ type DocumentTabsProps = {
   onDelete: (id: string) => void;
   filterOptions: {
     status: {
-      analyzing: boolean;
+      pending: boolean;
+      processing: boolean;
       completed: boolean;
-      error: boolean,
+      error: boolean;
     };
     risk: {
       low: boolean;
@@ -75,11 +57,18 @@ const DocumentTabs: React.FC<DocumentTabsProps> = ({
               <div className="p-2">
                 <p className="text-xs font-medium text-muted-foreground mb-2">Status</p>
                 <DropdownMenuCheckboxItem
-                  checked={filterOptions.status.analyzing}
-                  onCheckedChange={(checked) => onFilterChange('status', 'analyzing', checked)}
+                  checked={filterOptions.status.pending}
+                  onCheckedChange={(checked) => onFilterChange('status', 'pending', checked)}
                   className="hover:bg-primary/10"
                 >
-                  Analyzing
+                  Pending
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={filterOptions.status.processing}
+                  onCheckedChange={(checked) => onFilterChange('status', 'processing', checked)}
+                  className="hover:bg-primary/10"
+                >
+                  Processing
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={filterOptions.status.completed}
@@ -104,87 +93,75 @@ const DocumentTabs: React.FC<DocumentTabsProps> = ({
                   onCheckedChange={(checked) => onFilterChange('risk', 'low', checked)}
                   className="hover:bg-primary/10"
                 >
-                  Low Risk
+                  Low
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={filterOptions.risk.medium}
                   onCheckedChange={(checked) => onFilterChange('risk', 'medium', checked)}
                   className="hover:bg-primary/10"
                 >
-                  Medium Risk
+                  Medium
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                   checked={filterOptions.risk.high}
                   onCheckedChange={(checked) => onFilterChange('risk', 'high', checked)}
                   className="hover:bg-primary/10"
                 >
-                  High Risk
+                  High
                 </DropdownMenuCheckboxItem>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {documents.length === 0 && contracts.length === 0 ? (
-          <div className="col-span-full text-center py-12 rounded-xl border bg-background/50 backdrop-blur-sm border-primary/20">
-            <p className="text-lg font-medium">No documents yet</p>
-            <p className="text-sm text-muted-foreground mt-2">Upload a document or create a contract to get started</p>
-          </div>
-        ) : (
-          <>
-            {documents.map((doc, index) => {
-              const baseProps = {
-                key: doc.id,
-                ...doc,
-                onDelete,
-                className: `animate-fade-in hover-scale [animation-delay:${index * 50}ms]`
-              };
 
-              if (doc.status === "analyzing" && doc.progress !== undefined) {
-                return (
-                  <DocumentCard 
-                    {...baseProps}
-                    status="analyzing"
-                    progress={doc.progress}
-                  />
-                );
-              } else if (doc.status === "completed" && doc.riskScore !== undefined) {
-                return (
-                  <DocumentCard 
-                    {...baseProps}
-                    status="completed"
-                    riskScore={doc.riskScore}
-                  />
-                );
-              } else {
-                return (
-                  <DocumentCard 
-                    {...baseProps}
-                    status="error"
-                  />
-                );
-              }
-            })}
-            
-            {contracts.map((contract, index) => (
-              <DocumentCard 
-                key={contract.id} 
-                id={contract.id}
-                title={contract.title}
-                date={contract.date}
-                status="completed"
-                riskScore={contract.riskScore || 0}
-                clauses={contract.riskAnalysis.length}
-                keyFindings={contract.riskAnalysis}
+      <Tabs defaultValue="all" className="w-full">
+        <TabsList className="grid w-full grid-cols-3 bg-background/50 backdrop-blur-sm border-primary/20">
+          <TabsTrigger value="all">All Documents</TabsTrigger>
+          <TabsTrigger value="contracts">Contracts</TabsTrigger>
+          <TabsTrigger value="analyses">Analyses</TabsTrigger>
+        </TabsList>
+        <TabsContent value="all" className="mt-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {documents.map((doc) => (
+              <DocumentCard
+                key={doc.id}
+                document={doc}
                 onDelete={onDelete}
-                className={`animate-fade-in hover-scale [animation-delay:${(documents.length + index) * 50}ms]`}
               />
             ))}
-          </>
-        )}
-      </div>
+          </div>
+        </TabsContent>
+        <TabsContent value="contracts" className="mt-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {contracts.map((contract) => (
+              <DocumentCard
+                key={contract.id}
+                document={{
+                  id: contract.id,
+                  title: contract.title,
+                  date: contract.date,
+                  status: "completed",
+                }}
+                onDelete={onDelete}
+              />
+            ))}
+          </div>
+        </TabsContent>
+        <TabsContent value="analyses" className="mt-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {documents
+              .filter((doc) => doc.status === "completed" && doc.riskScore !== undefined)
+              .map((doc) => (
+                <DocumentCard
+                  key={doc.id}
+                  document={doc}
+                  onDelete={onDelete}
+                />
+              ))}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

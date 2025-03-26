@@ -1,39 +1,69 @@
 import { createClient } from '@supabase/supabase-js';
+import type { Database } from './database.types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Create a mock client for development if environment variables are missing
-const createMockClient = () => {
-  console.warn('Supabase environment variables are missing. Using mock client for development.');
-  return {
+console.log('Supabase URL:', supabaseUrl);
+console.log('Supabase Anon Key:', supabaseAnonKey ? 'Present' : 'Missing');
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables');
+}
+
+export const supabase = createClient<Database>(
+  supabaseUrl || 'https://xpwdhwmqnnuydbkcxyhi.supabase.co',
+  supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhwd2Rod21xbm51eWRia2N4eWhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI4OTU0MTksImV4cCI6MjA1ODQ3MTQxOX0.Xkhtet-EUT1HMmyEcJB5U_xquVZaNermNVyOGgZNAaw',
+  {
     auth: {
-      getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-      signInWithPassword: () => Promise.resolve({ data: { user: null }, error: null }),
-      signUp: () => Promise.resolve({ data: { user: null }, error: null }),
-      signOut: () => Promise.resolve({ error: null }),
-      resetPasswordForEmail: () => Promise.resolve({ data: null, error: null }),
-      updateUser: () => Promise.resolve({ data: { user: null }, error: null }),
-      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
-    },
-    from: (table: string) => ({
-      select: () => Promise.resolve({ data: [], error: null }),
-      insert: () => Promise.resolve({ data: null, error: null }),
-      update: () => Promise.resolve({ data: null, error: null }),
-      delete: () => Promise.resolve({ error: null }),
-    }),
-    storage: {
-      from: (bucket: string) => ({
-        upload: () => Promise.resolve({ data: null, error: null }),
-        getPublicUrl: () => ({ data: { publicUrl: '' } }),
-      }),
-    },
-  };
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
+);
+
+// Initialize storage bucket
+export const STORAGE_BUCKET = 'documents';
+
+// Initialize storage bucket if it doesn't exist
+export const initializeStorage = async () => {
+  try {
+    // Check if user is authenticated
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      console.log('User not authenticated, skipping storage initialization');
+      return;
+    }
+
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const bucketExists = buckets?.some(bucket => bucket.name === STORAGE_BUCKET);
+    
+    if (!bucketExists) {
+      const { data, error } = await supabase.storage.createBucket(STORAGE_BUCKET, {
+        public: false,
+        fileSizeLimit: 52428800, // 50MB
+        allowedMimeTypes: ['application/pdf', 'text/plain']
+      });
+      
+      if (error) {
+        console.error('Error creating bucket:', error);
+        return;
+      }
+
+      // Set up RLS policies for the bucket
+      const { error: policyError } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl('test.txt', 60);
+      if (policyError) {
+        console.error('Error setting up storage policies:', policyError);
+      }
+    }
+  } catch (error) {
+    console.error('Error initializing storage:', error);
+  }
 };
 
-export const supabase = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : createMockClient();
+// Call initialization
+initializeStorage();
 
 // Types for our database tables
 export type User = {
