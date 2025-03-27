@@ -1,5 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import { Document, DocumentCreateInput, DocumentUpdateInput } from '@/types/document';
+import jsPDF from 'jspdf';
+import { Document as DocxDocument, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
+import { saveAs } from 'file-saver';
 
 export interface SearchFilters {
   searchTerm?: string;
@@ -52,6 +55,22 @@ export const documentService = {
         .single();
 
       if (error) throw error;
+
+      // If we have analysis results, ensure they're properly mapped to the document fields
+      if (data.analysis_result) {
+        return {
+          data: {
+            ...data,
+            riskScore: data.analysis_result.riskScore,
+            clauses: data.analysis_result.clauses,
+            summary: data.analysis_result.summary,
+            jurisdiction: data.analysis_result.jurisdiction,
+            keyFindings: data.analysis_result.keyFindings
+          },
+          error: null
+        };
+      }
+
       return { data, error: null };
     } catch (error) {
       return { data: null, error: error as Error };
@@ -60,6 +79,28 @@ export const documentService = {
 
   async updateDocument(id: string, input: DocumentUpdateInput): Promise<{ data: Document | null; error: Error | null }> {
     try {
+      // If we have analysis results, update the document with all the analysis fields
+      if (input.analysis_result) {
+        const { data, error } = await supabase
+          .from('documents')
+          .update({
+            status: 'completed',
+            riskScore: input.analysis_result.riskScore,
+            clauses: input.analysis_result.clauses,
+            summary: input.analysis_result.summary,
+            jurisdiction: input.analysis_result.jurisdiction,
+            keyFindings: input.analysis_result.keyFindings,
+            analysis_result: input.analysis_result
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return { data, error: null };
+      }
+
+      // For other updates, just update the specified fields
       const { data, error } = await supabase
         .from('documents')
         .update(input)
@@ -193,4 +234,65 @@ export const documentService = {
       throw error;
     }
   },
+
+  generatePDF: (content: string, title: string) => {
+    const doc = new jsPDF();
+    
+    // Add title
+    doc.setFontSize(16);
+    doc.text(title, 20, 20);
+    doc.setFontSize(12);
+    
+    // Split content into lines that fit the page
+    const splitText = doc.splitTextToSize(content, 170);
+    
+    // Add content with proper line spacing
+    let y = 30;
+    splitText.forEach((line: string) => {
+      if (y > 280) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.text(line, 20, y);
+      y += 7;
+    });
+    
+    // Save the PDF
+    doc.save(`${title.toLowerCase().replace(/\s+/g, '_')}.pdf`);
+  },
+
+  generateWord: async (content: string, title: string) => {
+    const doc = new DocxDocument({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            text: title,
+            heading: HeadingLevel.HEADING_1,
+            spacing: {
+              after: 200,
+              line: 360,
+            },
+          }),
+          ...content.split('\n\n').map(paragraph => 
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: paragraph,
+                  size: 24,
+                }),
+              ],
+              spacing: {
+                after: 200,
+                line: 360,
+              },
+            })
+          ),
+        ],
+      }],
+    });
+
+    const buffer = await Packer.toBlob(doc);
+    saveAs(buffer, `${title.toLowerCase().replace(/\s+/g, '_')}.docx`);
+  }
 }; 

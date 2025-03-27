@@ -19,15 +19,18 @@ import jsPDF from 'jspdf';
 import { Progress } from "@/components/ui/progress";
 import { useExpandedPreview } from "@/hooks/use-expanded-preview";
 import { motion, AnimatePresence } from "framer-motion";
+import { contractTemplates, generateContract, ContractTemplate } from "@/services/geminiService";
+import { contractStorageService } from "@/services/contractStorageService";
+import { documentService } from '@/services/documentService';
 
 type ContractFormProps = {
-  onGenerate: (contract: GeneratedContract) => void;
+  onGenerate: (contract: string) => void;
   popularAgreements?: { label: string; value: string; }[];
 };
 
 export type ContractFormData = {
-  gist: string;
   contractType: string;
+  judiciary: string;
   party1: {
     name: string;
     address: string;
@@ -38,7 +41,8 @@ export type ContractFormData = {
     address: string;
     showAddress: boolean;
   };
-  termsHighlights: string;
+  description: string;
+  keyTerms: string;
   intensity: 'simple' | 'moderate' | 'watertight';
 };
 
@@ -84,21 +88,54 @@ const contractTypes = [
   "SAAS Agreement"
 ];
 
+// Add judiciary options
+const judiciaryOptions = [
+  { value: "common_law", label: "Common Law (US, UK, Canada, Australia)" },
+  { value: "civil_law", label: "Civil Law (France, Germany, Japan)" },
+  { value: "islamic_law", label: "Islamic Law (Sharia)" },
+  { value: "customary_law", label: "Customary Law" },
+  { value: "mixed_systems", label: "Mixed Systems (India, South Africa)" },
+  { value: "international", label: "International Law" },
+  { value: "eu_law", label: "European Union Law" },
+  { value: "chinese_law", label: "Chinese Law" },
+  { value: "russian_law", label: "Russian Law" },
+  { value: "brazilian_law", label: "Brazilian Law" },
+  { value: "indian_law", label: "Indian Law" },
+  { value: "japanese_law", label: "Japanese Law" },
+  { value: "german_law", label: "German Law" },
+  { value: "french_law", label: "French Law" },
+  { value: "british_law", label: "British Law" },
+  { value: "american_law", label: "American Law" },
+  { value: "canadian_law", label: "Canadian Law" },
+  { value: "australian_law", label: "Australian Law" },
+  { value: "singapore_law", label: "Singapore Law" },
+  { value: "hong_kong_law", label: "Hong Kong Law" }
+];
+
 const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
+  const { toast } = useToast();
   const [formData, setFormData] = useState<ContractFormData>({
-    gist: "",
-    contractType: "",
-    party1: { name: "", address: "", showAddress: false },
-    party2: { name: "", address: "", showAddress: false },
-    termsHighlights: "",
-    intensity: "moderate",
+    contractType: '',
+    judiciary: '',
+    party1: {
+      name: '',
+      address: '',
+      showAddress: false
+    },
+    party2: {
+      name: '',
+      address: '',
+      showAddress: false
+    },
+    description: '',
+    keyTerms: '',
+    intensity: 'moderate'
   });
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState(0);
-  const [contract, setContract] = useState<GeneratedContract | null>(null);
+  const [contract, setContract] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [formCollapsed, setFormCollapsed] = useState(false);
-  const { toast } = useToast();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -117,8 +154,8 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
     }
   };
 
-  const handleSelectChange = (name: string, value: string) => {
-    setFormData(prev => ({ ...prev, [name]: value }));
+  const handleSelectChange = (value: string) => {
+    setFormData(prev => ({ ...prev, contractType: value }));
   };
 
   const handleCheckboxChange = (parent: string, child: string, checked: boolean) => {
@@ -140,169 +177,92 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
     setFormData(prev => ({ ...prev, intensity: intensityMap[value] }));
   };
 
-  const generateContract = async () => {
-    if (!formData.gist || !formData.contractType || !formData.party1.name || !formData.party2.name) {
+  const handleGenerate = async () => {
+    if (!formData.contractType || !formData.judiciary || !formData.party1.name || !formData.party2.name || !formData.description) {
       toast({
-        title: "Missing information",
-        description: "Please fill in all required fields.",
-        variant: "destructive",
+        title: "Missing Information",
+        description: "Please fill in all required fields",
+        variant: "destructive"
       });
       return;
     }
 
     setIsGenerating(true);
-    setGenerationProgress(0);
-    
     try {
-      // TODO: Implement actual contract generation API call
-      const response = await fetch('/api/generate-contract', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
+      const template = contractTemplates.find(t => t.title === formData.contractType);
+      if (!template) throw new Error('Invalid contract type');
 
-      if (!response.ok) {
-        throw new Error('Failed to generate contract');
-      }
+      // Format the contract data to match the expected type
+      const contractData: Record<string, string> = {
+        contractType: formData.contractType,
+        judiciary: formData.judiciary,
+        party1Name: formData.party1.name,
+        party1Address: formData.party1.showAddress ? formData.party1.address : '',
+        party2Name: formData.party2.name,
+        party2Address: formData.party2.showAddress ? formData.party2.address : '',
+        description: formData.description,
+        keyTerms: formData.keyTerms,
+        intensity: formData.intensity,
+        ...template.requiredFields.reduce((acc, field) => ({
+          ...acc,
+          [field.toLowerCase().replace(/\s+/g, '_')]: formData[field.toLowerCase().replace(/\s+/g, '_')] || ''
+        }), {})
+      };
 
-      const generatedContract = await response.json();
+      const generatedContract = await generateContract(template, contractData);
       setContract(generatedContract);
-      onGenerate(generatedContract);
-      setIsExpanded(true);
       
-      if (window.innerWidth < 768) {
-        setFormCollapsed(true);
+      // Save the contract to Supabase storage
+      const savedContract = await contractStorageService.saveContract(
+        generatedContract,
+        formData.contractType
+      );
+
+      if (savedContract) {
+        toast({
+          title: "Success",
+          description: "Contract generated and saved successfully"
+        });
+      } else {
+        toast({
+          title: "Warning",
+          description: "Contract generated but failed to save",
+          variant: "destructive"
+        });
       }
 
-      toast({
-        title: "Contract generated",
-        description: "Your contract has been successfully created.",
-      });
+      onGenerate(generatedContract);
     } catch (error) {
-      console.error('Contract generation error:', error);
       toast({
-        title: "Generation error",
+        title: "Error",
         description: "Failed to generate contract. Please try again.",
-        variant: "destructive",
+        variant: "destructive"
       });
     } finally {
       setIsGenerating(false);
-      setGenerationProgress(100);
-    }
-  };
-
-  const regenerateContract = () => {
-    if (contract) {
-      generateContract();
-      
-      toast({
-        title: "Regenerating contract",
-        description: "Creating a new version of your contract...",
-      });
-    }
-  };
-
-  const handleDownloadPDF = async () => {
-    if (!contract) return;
-    
-    const contractElement = document.getElementById('contract-preview');
-    if (!contractElement) return;
-    
-    toast({
-      title: "Preparing document",
-      description: "Generating PDF...",
-    });
-    
-    try {
-      const canvas = await html2canvas(contractElement);
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`${contract.title.replace(/\s+/g, '_')}.pdf`);
-      
-      toast({
-        title: "Download complete",
-        description: "Your contract has been downloaded as a PDF.",
-      });
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      toast({
-        title: "Download failed",
-        description: "There was an error generating the PDF. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDownloadWord = () => {
-    if (!contract) return;
-    
-    toast({
-      title: "Preparing document",
-      description: "Generating Word document...",
-    });
-    
-    try {
-      // Create a blob with the content
-      const preface = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-<head>
-<meta charset="utf-8">
-<title>${contract.title}</title>
-</head>
-<body>
-<h2>${contract.title}</h2>
-`;
-      
-      const postface = `</body></html>`;
-      const fullHtml = preface + contract.content.replace(/\n/g, '<br>') + postface;
-      
-      const blob = new Blob([fullHtml], { type: 'application/msword' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${contract.title.replace(/\s+/g, '_')}.doc`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      toast({
-        title: "Download complete",
-        description: "Your contract has been downloaded as a Word document.",
-      });
-    } catch (error) {
-      console.error('Error generating Word document:', error);
-      toast({
-        title: "Download failed",
-        description: "There was an error generating the Word document. Please try again.",
-        variant: "destructive",
-      });
     }
   };
 
   const handleCopyText = () => {
-    if (!contract) return;
-    
-    navigator.clipboard.writeText(contract.content);
-    
-    toast({
-      title: "Text copied",
-      description: "Contract text has been copied to clipboard.",
-    });
+    if (contract) {
+      navigator.clipboard.writeText(contract);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast({
+        title: "Copied",
+        description: "Contract text copied to clipboard"
+      });
+    }
   };
 
-  const getIntensityValue = () => {
-    const intensityMap: Record<'simple' | 'moderate' | 'watertight', number> = {
-      simple: 0,
-      moderate: 50,
-      watertight: 100
-    };
-    return intensityMap[formData.intensity] || 50;
+  const handleDownloadPDF = () => {
+    if (!contract) return;
+    documentService.generatePDF(contract, contractTemplates.find(t => t.title === formData.contractType)?.title);
+  };
+
+  const handleDownloadWord = async () => {
+    if (!contract) return;
+    await documentService.generateWord(contract, contractTemplates.find(t => t.title === formData.contractType)?.title);
   };
 
   const toggleFormCollapse = () => {
@@ -311,16 +271,6 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
-  };
-
-  // Add validation function
-  const isFormValid = () => {
-    return (
-      formData.contractType.trim() !== '' &&
-      formData.party1.name.trim() !== '' &&
-      formData.party2.name.trim() !== '' &&
-      formData.gist.trim() !== ''
-    );
   };
 
   return (
@@ -336,33 +286,44 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
             transition={{ duration: 0.3 }}
           >
             <div>
-              <Label htmlFor="contractType">Contract Type</Label>
-              <Select value={formData.contractType} onValueChange={(value) => handleSelectChange('contractType', value)}>
-                <SelectTrigger className="w-full bg-bento-gray-50 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700">
+              <Label>Contract Type</Label>
+              <Select value={formData.contractType} onValueChange={handleSelectChange}>
+                <SelectTrigger>
                   <SelectValue placeholder="Select contract type" />
                 </SelectTrigger>
-                <SelectContent className="max-h-80">
-                  {contractTypes.map((type) => (
-                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                <SelectContent>
+                  {contractTemplates.map((template) => (
+                    <SelectItem key={template.title} value={template.title}>
+                      {template.title}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            
-            <motion.div 
-              className="space-y-2"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-            >
-              <Label htmlFor="party1.name">First Party Name</Label>
+
+            <div>
+              <Label>Jurisdiction</Label>
+              <Select value={formData.judiciary} onValueChange={(value) => setFormData(prev => ({ ...prev, judiciary: value }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select jurisdiction" />
+                </SelectTrigger>
+                <SelectContent>
+                  {judiciaryOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>First Party Name</Label>
               <Input
-                id="party1.name"
                 name="party1.name"
                 placeholder="Enter name of first party"
                 value={formData.party1.name}
                 onChange={handleChange}
-                className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
               />
               
               <div className="flex items-center space-x-2 mt-1.5">
@@ -373,7 +334,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                 />
                 <label 
                   htmlFor="party1AddressCheckbox" 
-                  className="text-sm text-bento-gray-600 dark:text-bento-gray-400 cursor-pointer"
+                  className="text-sm text-muted-foreground cursor-pointer"
                 >
                   Add address details
                 </label>
@@ -389,35 +350,26 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                     className="overflow-hidden"
                   >
                     <div className="pt-2">
-                      <Label htmlFor="party1.address">First Party Address</Label>
+                      <Label>First Party Address</Label>
                       <Input
-                        id="party1.address"
                         name="party1.address"
                         placeholder="Enter address"
                         value={formData.party1.address}
                         onChange={handleChange}
-                        className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
                       />
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </motion.div>
-            
-            <motion.div 
-              className="space-y-2"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}
-            >
-              <Label htmlFor="party2.name">Second Party Name</Label>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Second Party Name</Label>
               <Input
-                id="party2.name"
                 name="party2.name"
                 placeholder="Enter name of second party"
                 value={formData.party2.name}
                 onChange={handleChange}
-                className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
               />
               
               <div className="flex items-center space-x-2 mt-1.5">
@@ -428,7 +380,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                 />
                 <label 
                   htmlFor="party2AddressCheckbox" 
-                  className="text-sm text-bento-gray-600 dark:text-bento-gray-400 cursor-pointer"
+                  className="text-sm text-muted-foreground cursor-pointer"
                 >
                   Add address details
                 </label>
@@ -444,94 +396,72 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                     className="overflow-hidden"
                   >
                     <div className="pt-2">
-                      <Label htmlFor="party2.address">Second Party Address</Label>
+                      <Label>Second Party Address</Label>
                       <Input
-                        id="party2.address"
                         name="party2.address"
                         placeholder="Enter address"
                         value={formData.party2.address}
                         onChange={handleChange}
-                        className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
                       />
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </motion.div>
-            
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}
-            >
-              <Label htmlFor="gist">Contract Description</Label>
+            </div>
+
+            <div>
+              <Label>Contract Description</Label>
               <Textarea
-                id="gist"
-                name="gist"
+                name="description"
                 placeholder="Briefly describe what this contract should cover..."
-                value={formData.gist}
+                value={formData.description}
                 onChange={handleChange}
-                className="min-h-[100px] bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                className="min-h-[100px]"
               />
-            </motion.div>
-            
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.4 }}
-            >
-              <Label htmlFor="termsHighlights">Key Terms (Optional)</Label>
+            </div>
+
+            <div>
+              <Label>Key Terms (Optional)</Label>
               <Textarea
-                id="termsHighlights"
-                name="termsHighlights"
+                name="keyTerms"
                 placeholder="List any specific terms you want to include..."
-                value={formData.termsHighlights}
+                value={formData.keyTerms}
                 onChange={handleChange}
-                className="min-h-[80px] bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                className="min-h-[80px]"
               />
-            </motion.div>
-            
-            <motion.div 
-              className="space-y-2"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.5 }}
-            >
+            </div>
+
+            <div className="space-y-2">
               <Label>Contract Intensity: {formData.intensity.charAt(0).toUpperCase() + formData.intensity.slice(1)}</Label>
               <Slider
-                defaultValue={[getIntensityValue()]}
+                defaultValue={[50]}
                 min={0}
                 max={100}
                 step={50}
                 onValueChange={(value) => handleIntensityChange(value[0])}
                 className="mt-2"
               />
-              <div className="flex justify-between text-xs text-bento-gray-500 dark:text-bento-gray-400 pt-1">
+              <div className="flex justify-between text-xs text-muted-foreground pt-1">
                 <span>Simple</span>
                 <span>Moderate</span>
                 <span>Watertight</span>
               </div>
-            </motion.div>
-            
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.6 }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+            </div>
+
+            <Button
+              onClick={handleGenerate}
+              disabled={isGenerating}
+              className="w-full"
             >
-              <Button 
-                onClick={generateContract}
-                disabled={isGenerating || !isFormValid()}
-                className="w-full bg-gradient-to-r from-bento-yellow-500 via-bento-orange-500 to-bento-brown-600 hover:from-bento-yellow-600 hover:via-bento-orange-600 hover:to-bento-brown-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isGenerating ? (
-                  <>Generating... <div className="ml-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /></>
-                ) : (
-                  <><FileText className="h-4 w-4 mr-2" /> Generate Contract</>
-                )}
-              </Button>
-            </motion.div>
+              {isGenerating ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                "Generate Contract"
+              )}
+            </Button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -542,13 +472,6 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
         layout
         transition={{ duration: 0.5, type: "spring", stiffness: 100 }}
       >
-        {isGenerating && (
-          <div className="relative w-full mb-2">
-            <Progress value={generationProgress} className="w-full h-2" />
-            <p className="text-xs text-muted-foreground text-center mt-1">Generating your contract...</p>
-          </div>
-        )}
-        
         <div className="flex justify-between items-center">
           <h3 className="text-lg font-medium">Contract Preview</h3>
           <div className="flex space-x-2">
@@ -600,8 +523,8 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 0.2 }}
             >
-              <h2 className="text-lg font-bold mb-4">{contract.title}</h2>
-              <div className="whitespace-pre-line">{contract.content}</div>
+              <h2 className="text-lg font-bold mb-4">{contractTemplates.find(t => t.title === formData.contractType)?.title}</h2>
+              <div className="whitespace-pre-line">{contract}</div>
             </motion.div>
           ) : (
             <div className="h-full flex items-center justify-center">
@@ -618,17 +541,6 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
               >
                 <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
                 <p className="text-base">Fill in the required information to see the contract preview</p>
-                {!isFormValid() && (
-                  <div className="mt-4 text-sm text-bento-gray-600 dark:text-bento-gray-300">
-                    <p className="font-medium mb-2">Required fields:</p>
-                    <ul className="text-left space-y-1">
-                      {!formData.contractType.trim() && <li>• Contract Type</li>}
-                      {!formData.party1.name.trim() && <li>• First Party Name</li>}
-                      {!formData.party2.name.trim() && <li>• Second Party Name</li>}
-                      {!formData.gist.trim() && <li>• Contract Description</li>}
-                    </ul>
-                  </div>
-                )}
               </motion.div>
             </div>
           )}
@@ -660,45 +572,12 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
               onClick={handleCopyText}
               className="border border-bento-gray-200 dark:border-bento-gray-700 hover-scale"
             >
-              <Copy className="h-4 w-4" />
+              {copied ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
             </Button>
-            <Button 
-              variant="outline"
-              onClick={regenerateContract}
-              className="border border-bento-gray-200 dark:border-bento-gray-700 hover-scale"
-            >
-              <RefreshCw className="h-4 w-4 mr-1" /> Regenerate
-            </Button>
-          </motion.div>
-        )}
-        
-        {contract && (
-          <motion.div 
-            className="space-y-3"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.4 }}
-          >
-            <h3 className="font-medium">Risk Analysis</h3>
-            {contract.riskAnalysis.map((item, index) => (
-              <motion.div 
-                key={index} 
-                className={`p-3 rounded-lg text-sm ${
-                  item.riskLevel === 'low' 
-                    ? 'bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-300' 
-                    : item.riskLevel === 'medium'
-                    ? 'bg-yellow-50 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
-                    : 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-300'
-                }`}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.3, delay: 0.2 + index * 0.1 }}
-                whileHover={{ scale: 1.01 }}
-              >
-                <h4 className="font-medium">{item.title}</h4>
-                <p className="text-xs mt-1">{item.description}</p>
-              </motion.div>
-            ))}
           </motion.div>
         )}
       </motion.div>

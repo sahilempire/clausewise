@@ -4,15 +4,18 @@ import { textExtractionService } from './textExtractionService';
 import { aiService } from './aiService';
 
 interface AnalysisResult {
+  documentTitle: string;
+  riskScore: number;
+  clauses: number;
   summary: string;
-  key_points: string[];
-  risks: Array<{
-    level: 'low' | 'medium' | 'high';
+  jurisdiction: string;
+  keyFindings: Array<{
+    title: string;
     description: string;
-    recommendation?: string;
+    riskLevel: 'low' | 'medium' | 'high';
+    extractedText?: string;
+    mitigationOptions?: string[];
   }>;
-  recommendations: string[];
-  metadata: Record<string, any>;
 }
 
 export const analysisService = {
@@ -39,8 +42,7 @@ export const analysisService = {
       if (!text) throw new Error('Failed to extract text from document');
 
       // Analyze the extracted text
-      const { data: analysis, error: aiError } = await aiService.analyzeText(text);
-      if (aiError) throw aiError;
+      const analysis = await aiService.analyzeText(text);
       if (!analysis) throw new Error('Failed to analyze document');
 
       // Update document with analysis results
@@ -48,7 +50,12 @@ export const analysisService = {
         .from('documents')
         .update({
           status: 'completed',
-          analysis_result: analysis
+          analysis_result: analysis,
+          riskScore: analysis.riskScore,
+          clauses: analysis.clauses,
+          summary: analysis.summary,
+          jurisdiction: analysis.jurisdiction,
+          keyFindings: analysis.keyFindings
         })
         .eq('id', documentId);
 
