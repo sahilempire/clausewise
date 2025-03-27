@@ -133,7 +133,7 @@ const Landing = () => {
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
               <Link to="/signup">
-                <Button size="lg" className="legal-button min-w-[180px] gap-2">
+                <Button size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 min-w-[180px] gap-2">
                   <span>Get Started</span>
                   <ArrowRight className="h-4 w-4" />
                 </Button>
