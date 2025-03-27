@@ -208,7 +208,7 @@ const Landing = () => {
               </div>
               
               <Link to="/dashboard">
-                <Button size="lg" className="legal-button min-w-[180px] gap-2">
+                <Button size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 min-w-[180px] gap-2">
                   <span>Try It Now</span>
                   <ArrowRight className="h-4 w-4" />
                 </Button>
