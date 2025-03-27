@@ -8,20 +8,16 @@ console.log('Supabase URL:', supabaseUrl);
 console.log('Supabase Anon Key:', supabaseAnonKey ? 'Present' : 'Missing');
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
+  throw new Error('Missing Supabase environment variables');
 }
 
-export const supabase = createClient<Database>(
-  supabaseUrl || 'https://xpwdhwmqnnuydbkcxyhi.supabase.co',
-  supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhwd2Rod21xbm51eWRia2N4eWhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI4OTU0MTksImV4cCI6MjA1ODQ3MTQxOX0.Xkhtet-EUT1HMmyEcJB5U_xquVZaNermNVyOGgZNAaw',
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
-    }
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
   }
-);
+});
 
 // Initialize storage bucket
 export const STORAGE_BUCKET = 'documents';

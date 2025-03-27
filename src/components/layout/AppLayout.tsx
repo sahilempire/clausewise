@@ -3,7 +3,7 @@ import { QuotaDisplay, QuotaData } from "../quota/QuotaDisplay";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Brain, ChevronDown, FileText, Settings, User, Menu, X, Command, Search, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Outlet } from "react-router-dom";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
 import {
@@ -33,15 +33,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { motion, AnimatePresence } from "framer-motion";
+import { Link } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
+import { User as SupabaseUser } from "@supabase/supabase-js";
+import { userService } from "@/services/userService";
+import { UserProfile } from "@/services/userService";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface AppLayoutProps {
-  children: React.ReactNode;
-  className?: string;
+  children?: React.ReactNode;
 }
 
-export function AppLayout({ children, className }: AppLayoutProps) {
+export const AppLayout = ({ children }: AppLayoutProps) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
   const { signOut } = useAuthContext();
   const { toast } = useToast();
@@ -51,6 +57,8 @@ export function AppLayout({ children, className }: AppLayoutProps) {
     analysesUsed: 3,
     analysesLimit: 5,
   };
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   // Handle scroll effect
   useEffect(() => {
@@ -86,30 +94,80 @@ export function AppLayout({ children, className }: AppLayoutProps) {
     };
   }, []);
 
-  const handleSignOut = async () => {
-    try {
-      const { error } = await signOut();
-      if (error) {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: error.message,
-        });
+  useEffect(() => {
+    loadUser();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        loadProfile(session.user.id);
       } else {
-        toast({
-          title: "Success",
-          description: "You have been signed out.",
-        });
-        navigate("/");
+        setProfile(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const loadUser = async () => {
+    try {
+      const { data: user, error } = await userService.getCurrentUser();
+      if (error) {
+        console.error('Error loading user:', error);
+        return;
+      }
+      setUser(user);
+      if (user) {
+        await loadProfile(user.id);
       }
     } catch (error) {
+      console.error('Error loading user:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadProfile = async (userId: string) => {
+    try {
+      const { data: profile, error } = await userService.getProfile();
+      if (error) {
+        console.error('Error loading profile:', error);
+        return;
+      }
+      setProfile(profile);
+    } catch (error) {
+      console.error('Error loading profile:', error);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      navigate('/login');
       toast({
-        variant: "destructive",
+        title: "Signed out",
+        description: "You have been successfully signed out",
+      });
+    } catch (error) {
+      console.error('Error signing out:', error);
+      toast({
         title: "Error",
-        description: "An unexpected error occurred while signing out.",
+        description: "Failed to sign out",
+        variant: "destructive",
       });
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn(
@@ -190,78 +248,69 @@ export function AppLayout({ children, className }: AppLayoutProps) {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-4">
-            <div className="hidden lg:flex relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Search documents..." 
-                className="pl-8 w-[200px] lg:w-[300px] h-9 legal-focus-ring"
-              />
-            </div>
             <div className="hidden md:flex items-center gap-6 px-4 py-1.5 rounded-full legal-glass">
               <QuotaDisplay data={quota} compact />
               <div className="h-4 w-px bg-border" />
               <ModeToggle />
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full legal-hover">
-                  <User className="h-5 w-5" />
+            {user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="rounded-full legal-hover">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={profile?.avatar_url} alt={profile?.full_name || user.email || ''} />
+                      <AvatarFallback>
+                        {profile?.full_name
+                          ? profile.full_name.split(' ').map(n => n[0]).join('')
+                          : user.email?.[0].toUpperCase() || 'U'}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56" align="end" forceMount>
+                  <DropdownMenuLabel className="font-normal">
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">{profile?.full_name || 'User'}</p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {user.email}
+                      </p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/account/profile">Profile</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/account/billing">Billing</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut}>
+                    Log out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <div className="flex items-center gap-4">
+                <Button variant="ghost" asChild>
+                  <Link to="/login">Login</Link>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 legal-glass">
-                <DropdownMenuLabel>My Account</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="legal-hover">Profile</DropdownMenuItem>
-                <DropdownMenuItem className="legal-hover">Settings</DropdownMenuItem>
-                <DropdownMenuItem className="legal-hover">Billing</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem 
-                  className="legal-hover text-red-600 focus:text-red-600"
-                  onClick={handleSignOut}
-                >
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <Button asChild>
+                  <Link to="/signup">Sign up</Link>
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </motion.header>
 
-      <main className="relative z-10 flex-1 container max-w-screen-2xl mx-auto px-4">
+      <main className="relative z-10 flex-1">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className={cn(
-            "max-w-6xl mx-auto py-8 space-y-6",
-            className
-          )}
+          className="w-full"
         >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-              className="flex items-center gap-3"
-            >
-              <div className="p-2 rounded-xl bg-primary/10 legal-border">
-                <Command className="h-6 w-6 text-primary" />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight legal-gradient-text">
-                AI-Driven Precision in Contract Analysis
-              </h1>
-            </motion.div>
-          </div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            className="relative rounded-xl border bg-card p-4 sm:p-6 md:p-8 legal-card"
-          >
-            <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent" />
-            {children}
-          </motion.div>
+          {children || <Outlet />}
         </motion.div>
       </main>
 
@@ -285,4 +334,4 @@ export function AppLayout({ children, className }: AppLayoutProps) {
       </motion.footer>
     </div>
   );
-}
+};

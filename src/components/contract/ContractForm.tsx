@@ -309,6 +309,10 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
     setFormCollapsed(!formCollapsed);
   };
 
+  const toggleExpanded = () => {
+    setIsExpanded(!isExpanded);
+  };
+
   // Add validation function
   const isFormValid = () => {
     return (
@@ -358,7 +362,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                 placeholder="Enter name of first party"
                 value={formData.party1.name}
                 onChange={handleChange}
-                className="bg-bento-gray-50 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
               />
               
               <div className="flex items-center space-x-2 mt-1.5">
@@ -392,7 +396,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                         placeholder="Enter address"
                         value={formData.party1.address}
                         onChange={handleChange}
-                        className="bg-bento-gray-50 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                        className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
                       />
                     </div>
                   </motion.div>
@@ -413,7 +417,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                 placeholder="Enter name of second party"
                 value={formData.party2.name}
                 onChange={handleChange}
-                className="bg-bento-gray-50 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
               />
               
               <div className="flex items-center space-x-2 mt-1.5">
@@ -447,7 +451,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                         placeholder="Enter address"
                         value={formData.party2.address}
                         onChange={handleChange}
-                        className="bg-bento-gray-50 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                        className="bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
                       />
                     </div>
                   </motion.div>
@@ -467,7 +471,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                 placeholder="Briefly describe what this contract should cover..."
                 value={formData.gist}
                 onChange={handleChange}
-                className="min-h-[100px] bg-bento-gray-50 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                className="min-h-[100px] bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
               />
             </motion.div>
             
@@ -483,7 +487,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
                 placeholder="List any specific terms you want to include..."
                 value={formData.termsHighlights}
                 onChange={handleChange}
-                className="min-h-[80px] bg-bento-gray-50 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
+                className="min-h-[80px] bg-bento-gray-50 bg-white/10 text-bento-gray-900 border-bento-gray-200 dark:bg-bento-gray-900/50 dark:text-bento-gray-100 dark:border-bento-gray-700"
               />
             </motion.div>
             
@@ -495,7 +499,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
             >
               <Label>Contract Intensity: {formData.intensity.charAt(0).toUpperCase() + formData.intensity.slice(1)}</Label>
               <Slider
-                value={[getIntensityValue()]}
+                defaultValue={[getIntensityValue()]}
                 min={0}
                 max={100}
                 step={50}
@@ -584,7 +588,7 @@ const ContractForm: React.FC<ContractFormProps> = ({ onGenerate }) => {
         </div>
         
         <motion.div 
-          className="relative overflow-auto h-[500px] border border-bento-gray-200 rounded-lg p-4 bg-white/80 dark:bg-bento-gray-800/80 dark:border-bento-gray-700 text-sm backdrop-blur-sm"
+          className="relative overflow-auto h-[500px] border border-bento-gray-200 rounded-lg p-4 dark:bg-bento-gray-800/80 dark:border-bento-gray-700 text-sm backdrop-blur-sm"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}

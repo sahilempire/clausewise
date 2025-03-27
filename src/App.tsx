@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import Dashboard from "./pages/Dashboard";
 import DocumentView from "./pages/DocumentView";
@@ -15,6 +15,8 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Documents } from "@/pages/documents/Documents";
+import Profile from "@/pages/account/Profile";
+import Billing from "@/pages/account/Billing";
 
 // Create a QueryClient for data fetching
 const queryClient = new QueryClient({
@@ -40,36 +42,12 @@ const App = () => (
                   <Route path="/" element={<Landing />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/signup" element={<SignUp />} />
-                  <Route
-                    path="/dashboard"
-                    element={
-                      <ProtectedRoute>
-                        <AppLayout>
-                          <Dashboard />
-                        </AppLayout>
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/documents"
-                    element={
-                      <ProtectedRoute>
-                        <AppLayout>
-                          <Documents />
-                        </AppLayout>
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/document/:id"
-                    element={
-                      <ProtectedRoute>
-                        <AppLayout>
-                          <DocumentView />
-                        </AppLayout>
-                      </ProtectedRoute>
-                    }
-                  />
+                  <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/document/:id" element={<DocumentView />} />
+                    <Route path="/account/profile" element={<Profile />} />
+                    <Route path="/account/billing" element={<Billing />} />
+                  </Route>
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </div>

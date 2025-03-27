@@ -48,6 +48,13 @@ const popularAgreements = [
   { label: "Equity Agreement", value: "equity" },
 ];
 
+interface Analytics {
+  totalDocuments: number;
+  completed: number;
+  processing: number;
+  errorRate: number;
+}
+
 const Dashboard = () => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [contracts, setContracts] = useState<GeneratedContract[]>([]);
@@ -382,6 +389,12 @@ const Dashboard = () => {
   const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [sortBy, setSortBy] = useState<'date' | 'risk' | 'title'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [analytics, setAnalytics] = useState<Analytics>({
+    totalDocuments: 0,
+    completed: 0,
+    processing: 0,
+    errorRate: 0
+  });
 
   // Update document filtering
   useEffect(() => {
@@ -411,8 +424,26 @@ const Dashboard = () => {
 
         if (data) {
           setFilteredDocuments(data);
+          // Update analytics
+          const total = data.length;
+          const completed = data.filter(doc => doc.status === 'completed').length;
+          const processing = data.filter(doc => doc.status === 'processing').length;
+          const errorRate = total > 0 ? (data.filter(doc => doc.status === 'error').length / total) * 100 : 0;
+
+          setAnalytics({
+            totalDocuments: total,
+            completed,
+            processing,
+            errorRate
+          });
         } else {
           setFilteredDocuments([]);
+          setAnalytics({
+            totalDocuments: 0,
+            completed: 0,
+            processing: 0,
+            errorRate: 0
+          });
         }
       } catch (error) {
         console.error('Error fetching documents:', error);
@@ -663,7 +694,7 @@ const Dashboard = () => {
         <DashboardAnalytics />
 
         {/* Search and Filter Section */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        {/* <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex-1">
             <Input
               placeholder="Search documents..."
@@ -695,14 +726,14 @@ const Dashboard = () => {
               {sortOrder === 'asc' ? '↑' : '↓'}
             </Button>
           </div>
-        </div>
+        </div> */}
 
         {/* Main Content */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="w-full max-w-2xl mx-auto relative rounded-xl overflow-hidden group"
+          className="w-full max-w-7xl mx-auto relative rounded-xl overflow-hidden group"
         >
           <div className="absolute -z-10 inset-0 rounded-xl bg-gradient-to-r from-primary/20 to-accent/20 p-[1.5px]">
             <div className="absolute inset-0 rounded-lg bg-background/80 backdrop-blur-sm"></div>
