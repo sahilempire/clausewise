@@ -7,11 +7,10 @@ import { ModeToggle } from "@/components/mode-toggle";
 
 const Index = () => {
   return (
-    <AppLayout className="overflow-hidden">
+    <AppLayout>
       {/* Hero Section */}
       <section className="relative min-h-[90vh] flex flex-col items-center justify-center overflow-hidden">
         <div className="absolute inset-0 bg-gradient-radial from-primary/5 to-transparent dark:from-primary/10 dark:to-background" />
-        
         {/* Green gradient blobs */}
         <div className="absolute h-40 w-40 bg-green-400/20 rounded-full blur-3xl -top-20 -right-20" />
         <div className="absolute h-60 w-60 bg-teal-300/20 rounded-full blur-3xl -bottom-32 -left-32" />

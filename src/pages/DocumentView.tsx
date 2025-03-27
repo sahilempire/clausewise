@@ -31,13 +31,22 @@ import {
   CheckCheck, 
   Trash2,
   Globe,
-  Flag
+  Flag,
+  Loader2,
+  AlertCircle,
+  Clock,
+  Play
 } from "lucide-react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
+import { cn } from "@/lib/utils";
+import { documentService } from '@/services/documentService';
+import { analysisService } from '@/services/analysisService';
+import { Document } from '@/types/document';
+import { motion } from 'framer-motion';
 
 // Define document data types
 type AnalyzingDocument = {
@@ -86,44 +95,123 @@ const DocumentView = () => {
   const documentRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [analyzing, setAnalyzing] = useState(false);
   
-  // Fetch document from localStorage
   useEffect(() => {
-    const fetchDocument = async () => {
-      try {
-        const storedDocuments = localStorage.getItem('documents');
-        let documents: Document[] = [];
-        
-        if (storedDocuments) {
-          documents = JSON.parse(storedDocuments);
+    if (id) {
+      loadDocument(id);
+      checkAnalysisStatus(id);
+    }
+  }, [id]);
+
+  const loadDocument = async (documentId: string) => {
+    try {
+      const { data, error } = await documentService.getDocument(documentId);
+      if (error) throw error;
+      setDocument(data);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to load document.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkAnalysisStatus = async (documentId: string) => {
+    const { status, error } = await analysisService.getAnalysisStatus(documentId);
+    if (error) {
+      console.error('Error checking analysis status:', error);
+      return;
+    }
+    if (status === 'processing') {
+      setAnalyzing(true);
+      // Poll for status updates
+      const interval = setInterval(async () => {
+        const { status: newStatus } = await analysisService.getAnalysisStatus(documentId);
+        if (newStatus !== 'processing') {
+          setAnalyzing(false);
+          clearInterval(interval);
+          loadDocument(documentId); // Reload document to get updated analysis
         }
-        
-        const foundDocument = documents.find(doc => doc.id === id);
-        
-        if (foundDocument) {
-          setDocument(foundDocument);
-        } else {
-          toast({
-            title: "Document not found",
-            description: "The requested document could not be found",
-            variant: "destructive"
-          });
-          navigate('/dashboard');
-        }
-      } catch (error) {
-        console.error("Error fetching document:", error);
-        toast({
-          title: "Error",
-          description: "There was an error loading the document",
-          variant: "destructive"
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
+      }, 5000); // Check every 5 seconds
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (!id) return;
     
-    fetchDocument();
-  }, [id, navigate, toast]);
+    setAnalyzing(true);
+    try {
+      const { error } = await analysisService.analyzeDocument(id);
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: "Document analysis started. This may take a few minutes.",
+      });
+      
+      // Start polling for status updates
+      checkAnalysisStatus(id);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to start document analysis.",
+      });
+      setAnalyzing(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+    
+    try {
+      const { error } = await documentService.deleteDocument(id);
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: "Document deleted successfully.",
+      });
+      
+      navigate('/dashboard');
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete document.",
+      });
+    }
+  };
+
+  const getStatusIcon = (status: Document['status']) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+      case 'processing':
+        return <Clock className="h-4 w-4 text-yellow-500" />;
+      case 'error':
+        return <AlertCircle className="h-4 w-4 text-red-500" />;
+      default:
+        return <Clock className="h-4 w-4 text-gray-500" />;
+    }
+  };
+
+  const getStatusColor = (status: Document['status']) => {
+    switch (status) {
+      case 'completed':
+        return 'bg-green-100 text-green-800';
+      case 'processing':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'error':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   const copyToClipboard = (text: string, index: number) => {
     navigator.clipboard.writeText(text);
@@ -136,34 +224,6 @@ const DocumentView = () => {
     setTimeout(() => {
       setCopiedIndex(null);
     }, 2000);
-  };
-  
-  const handleDeleteDocument = () => {
-    try {
-      const storedDocuments = localStorage.getItem('documents');
-      let documents: Document[] = [];
-      
-      if (storedDocuments) {
-        documents = JSON.parse(storedDocuments);
-      }
-      
-      const updatedDocuments = documents.filter(doc => doc.id !== id);
-      localStorage.setItem('documents', JSON.stringify(updatedDocuments));
-      
-      toast({
-        title: "Document deleted",
-        description: "The document has been successfully deleted",
-      });
-      
-      navigate('/dashboard');
-    } catch (error) {
-      console.error("Error deleting document:", error);
-      toast({
-        title: "Error",
-        description: "There was an error deleting the document",
-        variant: "destructive"
-      });
-    }
   };
   
   const handleDownloadPDF = async () => {
@@ -323,7 +383,7 @@ const DocumentView = () => {
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleDeleteDocument} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                       Delete
                     </AlertDialogAction>
                   </AlertDialogFooter>
@@ -391,7 +451,7 @@ const DocumentView = () => {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDeleteDocument} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                   Delete
                 </AlertDialogAction>
               </AlertDialogFooter>
